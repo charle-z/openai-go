@@ -1,5 +1,32 @@
 # Changelog
 
+## [3.51.0](https://github.com/openai/openai-go/compare/v3.50.0...v3.51.0) (2026-08-12)
+
+
+### Features
+
+* **api:** Add model constants for Daybreak and gpt-5.6-cyber ([df00e97](https://github.com/openai/openai-go/commit/df00e9760b4584dc0986b7383ecb843a9cf67789))
+* **api:** add workload identity access token issued event ([#766](https://github.com/openai/openai-go/issues/766)) ([c61af30](https://github.com/openai/openai-go/commit/c61af303735128ab487ec1486cdf4983047bcbc0))
+
+
+### Bug Fixes
+
+* **api:** Add model constants for Daybreak and gpt-5.6-cyber ([#763](https://github.com/openai/openai-go/issues/763)) ([df00e97](https://github.com/openai/openai-go/commit/df00e9760b4584dc0986b7383ecb843a9cf67789))
+* **api:** clarify audio upload metadata requirements ([#764](https://github.com/openai/openai-go/issues/764)) ([e75e3aa](https://github.com/openai/openai-go/commit/e75e3aaf598f6257445984cfedaf3dd40d790a29))
+
+
+### Chores
+
+* **api:** No public API change; update file header comments ([#755](https://github.com/openai/openai-go/issues/755)) ([d0a42cc](https://github.com/openai/openai-go/commit/d0a42cc753ffb56b7f268ecc2b9975ca58203215))
+* remove Stainless attribution and infrastructure ([#765](https://github.com/openai/openai-go/issues/765)) ([9b3d395](https://github.com/openai/openai-go/commit/9b3d395105c3272d0d703f8e1e3e37776f7b42a5))
+
+
+### Build System
+
+* **deps:** bump github.com/aws/aws-sdk-go-v2/config in / ([#759](https://github.com/openai/openai-go/issues/759)) ([e8dfbe0](https://github.com/openai/openai-go/commit/e8dfbe097d282f0c0aee74f6aed00a6b4decb7c0))
+* **deps:** bump the codeql group with 2 updates ([#760](https://github.com/openai/openai-go/issues/760)) ([9bbfebf](https://github.com/openai/openai-go/commit/9bbfebf71e721d0575ccbd56d0aaeacc4a4cef10))
+* **deps:** enforce an eight-day dependency cooldown ([#762](https://github.com/openai/openai-go/issues/762)) ([744e64f](https://github.com/openai/openai-go/commit/744e64ff17ba988371534849e22555255d90bb56))
+
 ## [3.50.0](https://github.com/openai/openai-go/compare/v3.49.0...v3.50.0) (2026-08-03)
 
 
