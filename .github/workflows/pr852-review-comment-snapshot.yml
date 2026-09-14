@@ -1,5 +1,6 @@
 name: PR852 review comment snapshot
 on:
+  workflow_dispatch:
   push:
     branches:
       - integrated/pr852-audit-comments
