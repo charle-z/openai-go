@@ -1,4 +1,4 @@
-name: PR852 final review evidence snapshot
+name: PR852 unauthenticated review snapshot
 on:
   push:
     branches:
@@ -7,10 +7,10 @@ permissions:
   contents: write
 jobs:
   snapshot:
-    if: ${{ !contains(github.event.head_commit.message, 'audit: persist PR852 32a c680 reviews') }}
+    if: ${{ !contains(github.event.head_commit.message, 'audit: persist PR852 public review snapshot') }}
     runs-on: ubuntu-latest
     steps:
-      - name: Persist 32a and c680 reviews/comments
+      - name: Fetch public upstream review evidence
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
@@ -19,20 +19,34 @@ jobs:
           SHA_B: c680c496e75003e5abfa935311a9ce480540f965
         run: |
           set -euo pipefail
+          reviews="$(mktemp)"
+          comments="$(mktemp)"
+          : > "$reviews"
+          : > "$comments"
+          for page in $(seq 1 10); do
+            body="$(curl -fsSL -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/openai/openai-go/pulls/852/reviews?per_page=100&page=$page")"
+            count="$(jq 'length' <<<"$body")"
+            jq -c '.[]' <<<"$body" >> "$reviews"
+            [ "$count" -lt 100 ] && break
+          done
+          for page in $(seq 1 10); do
+            body="$(curl -fsSL -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/openai/openai-go/pulls/852/comments?per_page=100&page=$page")"
+            count="$(jq 'length' <<<"$body")"
+            jq -c '.[]' <<<"$body" >> "$comments"
+            [ "$count" -lt 100 ] && break
+          done
           out="$(mktemp)"
           {
             echo '=== REVIEWS ==='
-            gh api --paginate 'repos/openai/openai-go/pulls/852/reviews?per_page=100' \
-              --jq ".[] | select(.commit_id == \"$SHA_A\" or .commit_id == \"$SHA_B\") | {id, user: .user.login, state, submitted_at, commit_id, body}"
+            jq -c --arg a "$SHA_A" --arg b "$SHA_B" 'select(.commit_id == $a or .commit_id == $b) | {id, user: .user.login, state, submitted_at, commit_id, body}' "$reviews"
             echo '=== REVIEW COMMENTS ==='
-            gh api --paginate 'repos/openai/openai-go/pulls/852/comments?per_page=100' \
-              --jq ".[] | select(.commit_id == \"$SHA_A\" or .commit_id == \"$SHA_B\") | {id, user: .user.login, created_at, updated_at, commit_id, pull_request_review_id, in_reply_to_id, path, line, original_line, body, html_url}"
+            jq -c --arg a "$SHA_A" --arg b "$SHA_B" 'select(.commit_id == $a or .commit_id == $b) | {id, user: .user.login, created_at, updated_at, commit_id, pull_request_review_id, in_reply_to_id, path, line, original_line, body, html_url}' "$comments"
           } > "$out"
           encoded="$(base64 -w0 "$out")"
-          path='audit/pr852-32a-c680-review-activity.txt'
+          path='audit/pr852-public-review-snapshot.txt'
           sha="$(gh api "repos/$REPO/contents/$path?ref=$BRANCH" --jq .sha 2>/dev/null || true)"
           if [ -n "$sha" ]; then
-            gh api --method PUT "repos/$REPO/contents/$path" -f message='audit: persist PR852 32a c680 reviews' -f content="$encoded" -f branch="$BRANCH" -f sha="$sha" >/dev/null
+            gh api --method PUT "repos/$REPO/contents/$path" -f message='audit: persist PR852 public review snapshot' -f content="$encoded" -f branch="$BRANCH" -f sha="$sha" >/dev/null
           else
-            gh api --method PUT "repos/$REPO/contents/$path" -f message='audit: persist PR852 32a c680 reviews' -f content="$encoded" -f branch="$BRANCH" >/dev/null
+            gh api --method PUT "repos/$REPO/contents/$path" -f message='audit: persist PR852 public review snapshot' -f content="$encoded" -f branch="$BRANCH" >/dev/null
           fi
