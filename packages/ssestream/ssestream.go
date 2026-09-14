@@ -1204,8 +1204,18 @@ func canonicalRFC2231MediaParameterIdentity(params string, estimatedIdentities i
 			return
 		}
 		name := param[nameStart:nameEnd]
+		if !strings.Contains(name, "*") {
+			return
+		}
 		logicalName := mediaParameterLogicalName(name)
-		if !strings.HasSuffix(name, "*") && strings.EqualFold(name, logicalName) {
+		if logicalName == "" {
+			valid = false
+			return
+		}
+		continuationSegment, continuation := extendedContinuationSection(param, logicalName)
+		singleExtended := strings.HasSuffix(name, "*") && !strings.Contains(strings.TrimSuffix(name, "*"), "*")
+		if !singleExtended && !continuation {
+			valid = false
 			return
 		}
 
@@ -1231,8 +1241,8 @@ func canonicalRFC2231MediaParameterIdentity(params string, estimatedIdentities i
 		}
 
 		identity := rfc2231MediaParameterIdentity{name: name, logicalName: logicalName}
-		if segment, ok := extendedContinuationSection(param, logicalName); ok {
-			identity.section = segment.section
+		if continuation {
+			identity.section = continuationSegment.section
 			identity.continuation = true
 		}
 		if hasMetadata {

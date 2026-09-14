@@ -1278,6 +1278,42 @@ func TestRegisterDecoderAllowsEqualDuplicatePlainFallbackWithExtendedValue(t *te
 	}
 }
 
+func TestRegisterDecoderXOPTypeRejectsInvalidStarredParameterNames(t *testing.T) {
+	const base = "application/xop+xml"
+	registered := `application/xop+xml; type="text/plain"`
+
+	for name, response := range map[string]string{
+		"unmatched star":       `application/xop+xml; type="text/plain; foo*bar=x"`,
+		"leading-zero encoded": `application/xop+xml; type="text/plain; foo*00*=UTF-8''x"`,
+		"leading-zero plain":   `application/xop+xml; type="text/plain; foo*01=x"`,
+		"starred base":         `application/xop+xml; type="text/plain; foo*bar*=UTF-8''x"`,
+		"double star":          `application/xop+xml; type="text/plain; foo**=UTF-8''x"`,
+		"empty extended base":  `application/xop+xml; type="text/plain; *=UTF-8''x"`,
+		"empty section base":   `application/xop+xml; type="text/plain; *0*=UTF-8''x"`,
+		"section overflow":     `application/xop+xml; type="text/plain; foo*4294967296*=UTF-8''x"`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if decoderContentTypeKey(registered) == decoderContentTypeKey(response) {
+				t.Fatal("invalid nested starred parameter collapsed onto valid XOP type key")
+			}
+
+			wantBare := &testDecoder{}
+			wantSpecific := &testDecoder{}
+			RegisterDecoder(base, func(io.ReadCloser) Decoder { return wantBare })
+			RegisterDecoder(registered, func(io.ReadCloser) Decoder { return wantSpecific })
+			t.Cleanup(func() {
+				delete(decoderTypes, decoderContentTypeKey(base))
+				delete(decoderTypes, decoderContentTypeKey(registered))
+			})
+
+			decoder := NewDecoder(&http.Response{Header: http.Header{"Content-Type": {response}}, Body: io.NopCloser(strings.NewReader(""))})
+			if decoder != wantBare {
+				t.Fatalf("decoder = %T, want bare decoder for invalid nested starred parameter", decoder)
+			}
+		})
+	}
+}
+
 func TestRegisterDecoderXOPTypePreservesUnsupportedRFC2231ValueIdentity(t *testing.T) {
 	for name, test := range map[string]struct {
 		first  string
