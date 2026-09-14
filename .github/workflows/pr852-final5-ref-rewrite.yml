@@ -1,46 +1,38 @@
-name: PR852 final c680 CI attestation
+name: PR852 final review evidence snapshot
 on:
   push:
     branches:
       - pr852-final-staging-7accf61
 permissions:
-  checks: read
   contents: write
 jobs:
-  attest:
+  snapshot:
+    if: ${{ !contains(github.event.head_commit.message, 'audit: persist PR852 32a c680 reviews') }}
     runs-on: ubuntu-latest
     steps:
-      - name: Require exact-head fork checks
+      - name: Persist 32a and c680 reviews/comments
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
-          TARGET_SHA: c680c496e75003e5abfa935311a9ce480540f965
+          BRANCH: pr852-final-staging-7accf61
+          SHA_A: 32a34d03e693b963fb634ecf86e74de29f908cd0
+          SHA_B: c680c496e75003e5abfa935311a9ce480540f965
         run: |
           set -euo pipefail
-          required=("lint" "test (Go 1.25.x)" "test (Go 1.26.x)")
-          for attempt in $(seq 1 40); do
-            checks="$(gh api "repos/$REPO/commits/$TARGET_SHA/check-runs?per_page=100")"
-            all_green=1
-            for name in "${required[@]}"; do
-              row="$(jq -r --arg name "$name" '[.check_runs[] | select(.name == $name)] | sort_by(.completed_at // .started_at) | last | [(.status // "missing"), (.conclusion // "")] | @tsv' <<<"$checks")"
-              status="${row%%$'\t'*}"
-              conclusion="${row#*$'\t'}"
-              echo "$name: status=$status conclusion=$conclusion"
-              if [[ "$status" == "completed" && "$conclusion" != "success" ]]; then
-                exit 1
-              fi
-              if [[ "$status" != "completed" || "$conclusion" != "success" ]]; then
-                all_green=0
-              fi
-            done
-            if [[ "$all_green" == 1 ]]; then
-              if gh api "repos/$REPO/git/ref/heads/pr852-ci-green-c680c49" >/dev/null 2>&1; then
-                gh api --method PATCH "repos/$REPO/git/refs/heads/pr852-ci-green-c680c49" -f sha="$TARGET_SHA" -F force=true >/dev/null
-              else
-                gh api --method POST "repos/$REPO/git/refs" -f ref='refs/heads/pr852-ci-green-c680c49' -f sha="$TARGET_SHA" >/dev/null
-              fi
-              exit 0
-            fi
-            sleep 15
-          done
-          exit 1
+          out="$(mktemp)"
+          {
+            echo '=== REVIEWS ==='
+            gh api --paginate 'repos/openai/openai-go/pulls/852/reviews?per_page=100' \
+              --jq ".[] | select(.commit_id == \"$SHA_A\" or .commit_id == \"$SHA_B\") | {id, user: .user.login, state, submitted_at, commit_id, body}"
+            echo '=== REVIEW COMMENTS ==='
+            gh api --paginate 'repos/openai/openai-go/pulls/852/comments?per_page=100' \
+              --jq ".[] | select(.commit_id == \"$SHA_A\" or .commit_id == \"$SHA_B\") | {id, user: .user.login, created_at, updated_at, commit_id, pull_request_review_id, in_reply_to_id, path, line, original_line, body, html_url}"
+          } > "$out"
+          encoded="$(base64 -w0 "$out")"
+          path='audit/pr852-32a-c680-review-activity.txt'
+          sha="$(gh api "repos/$REPO/contents/$path?ref=$BRANCH" --jq .sha 2>/dev/null || true)"
+          if [ -n "$sha" ]; then
+            gh api --method PUT "repos/$REPO/contents/$path" -f message='audit: persist PR852 32a c680 reviews' -f content="$encoded" -f branch="$BRANCH" -f sha="$sha" >/dev/null
+          else
+            gh api --method PUT "repos/$REPO/contents/$path" -f message='audit: persist PR852 32a c680 reviews' -f content="$encoded" -f branch="$BRANCH" >/dev/null
+          fi
