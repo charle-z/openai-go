@@ -1174,8 +1174,11 @@ func canonicalMIMEMediaTypeValue(value string) (string, bool) {
 
 type rfc2231MediaParameterIdentity struct {
 	name          string
+	logicalName   string
 	language      string
 	fallbackIndex uint32
+	section       uint32
+	continuation  bool
 }
 
 type rfc2231MediaParameterFallback struct {
@@ -1227,7 +1230,11 @@ func canonicalRFC2231MediaParameterIdentity(params string, estimatedIdentities i
 			}
 		}
 
-		identity := rfc2231MediaParameterIdentity{name: name}
+		identity := rfc2231MediaParameterIdentity{name: name, logicalName: logicalName}
+		if segment, ok := extendedContinuationSection(param, logicalName); ok {
+			identity.section = segment.section
+			identity.continuation = true
+		}
 		if hasMetadata {
 			charset, language, data, ok := splitRFC2231IdentityMetadata(core)
 			if !ok {
@@ -1255,11 +1262,45 @@ func canonicalRFC2231MediaParameterIdentity(params string, estimatedIdentities i
 		return "", true
 	}
 	sort.Slice(identities, func(i, j int) bool {
+		if comparison := compareASCIIFold(identities[i].logicalName, identities[j].logicalName); comparison != 0 {
+			return comparison < 0
+		}
+		if identities[i].continuation != identities[j].continuation {
+			return !identities[i].continuation
+		}
+		if identities[i].continuation && identities[i].section != identities[j].section {
+			return identities[i].section < identities[j].section
+		}
 		if comparison := compareASCIIFold(identities[i].name, identities[j].name); comparison != 0 {
 			return comparison < 0
 		}
 		return compareASCIIFold(identities[i].language, identities[j].language) < 0
 	})
+
+	var continuationLogicalName string
+	var previousSection uint32
+	haveContinuation := false
+	for _, identity := range identities {
+		if !identity.continuation {
+			continue
+		}
+		if !haveContinuation || !strings.EqualFold(identity.logicalName, continuationLogicalName) {
+			if identity.section != 0 {
+				return "", false
+			}
+			continuationLogicalName = identity.logicalName
+			previousSection = 0
+			haveContinuation = true
+			continue
+		}
+		if identity.section == previousSection {
+			continue
+		}
+		if previousSection == ^uint32(0) || identity.section != previousSection+1 {
+			return "", false
+		}
+		previousSection = identity.section
+	}
 
 	var encoded strings.Builder
 	encoded.Grow(encodedLength)

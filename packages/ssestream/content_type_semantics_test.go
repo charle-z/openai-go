@@ -831,6 +831,42 @@ func TestRegisterDecoderCanonicalizesContextualParametersInsideXOPType(t *testin
 	}
 }
 
+func TestRegisterDecoderXOPTypeRejectsGappedRFC2231Continuations(t *testing.T) {
+	const base = "application/xop+xml"
+	registered := `application/xop+xml; type="text/plain; format*0*=UTF-8''FLOWED; format*2*=X"`
+	response := `Application/Xop+Xml; type="text/plain; format*0*=UTF-8''FLOWED; format*2*=Y"`
+	if registeredKey, responseKey := decoderContentTypeKey(registered), decoderContentTypeKey(response); registeredKey == responseKey {
+		t.Fatalf("gapped XOP continuations share decoder key %q", registeredKey)
+	}
+
+	wantBare := &testDecoder{}
+	wantSpecific := &testDecoder{}
+	RegisterDecoder(base, func(io.ReadCloser) Decoder { return wantBare })
+	RegisterDecoder(registered, func(io.ReadCloser) Decoder { return wantSpecific })
+	t.Cleanup(func() {
+		delete(decoderTypes, decoderContentTypeKey(base))
+		delete(decoderTypes, decoderContentTypeKey(registered))
+	})
+
+	decoder := NewDecoder(&http.Response{Header: http.Header{"Content-Type": {response}}, Body: io.NopCloser(strings.NewReader(""))})
+	if decoder != wantBare {
+		t.Fatalf("decoder = %T, want bare decoder for gapped XOP continuation", decoder)
+	}
+}
+
+func TestRegisterDecoderXOPTypeAcceptsContiguousRFC2231Continuations(t *testing.T) {
+	registered := `application/xop+xml; type="text/plain; format*0*=UTF-8''FLO; format*1*=WED"`
+	response := `Application/Xop+Xml; type="Text/Plain; format*0*=utf-8''flo; format*1*=wed"`
+	want := &testDecoder{}
+	RegisterDecoder(registered, func(io.ReadCloser) Decoder { return want })
+	t.Cleanup(func() { delete(decoderTypes, decoderContentTypeKey(registered)) })
+
+	decoder := NewDecoder(&http.Response{Header: http.Header{"Content-Type": {response}}, Body: io.NopCloser(strings.NewReader(""))})
+	if decoder != want {
+		t.Fatalf("decoder = %T, want registered decoder for contiguous XOP continuation", decoder)
+	}
+}
+
 func TestExternalBodyAccessTypeAvoidsSecondFullMediaTypeParse(t *testing.T) {
 	var contentType strings.Builder
 	contentType.WriteString("message/external-body; access-type=FTP")
