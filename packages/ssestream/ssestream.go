@@ -960,12 +960,23 @@ func isInitialMediaParameterSegment(name string, logicalName string) bool {
 }
 
 func mediaParameterLogicalName(name string) string {
-	logicalName := strings.TrimSuffix(name, "*")
-	section := strings.LastIndexByte(logicalName, '*')
-	if section < 0 || !isRFC2231Section(logicalName[section+1:]) {
+	if logicalName, _, ok := mediaParameterContinuationSection(name); ok {
 		return logicalName
 	}
-	return logicalName[:section]
+	return strings.TrimSuffix(name, "*")
+}
+
+func mediaParameterContinuationSection(name string) (string, uint32, bool) {
+	sectionName := strings.TrimSuffix(name, "*")
+	star := strings.LastIndexByte(sectionName, '*')
+	if star < 0 || !isRFC2231Section(sectionName[star+1:]) {
+		return "", 0, false
+	}
+	sectionValue, err := strconv.ParseUint(sectionName[star+1:], 10, 32)
+	if err != nil {
+		return "", 0, false
+	}
+	return sectionName[:star], uint32(sectionValue), true
 }
 
 func extendedMediaParameterHasMetadata(name string) bool {
@@ -1174,7 +1185,10 @@ func canonicalMIMEMediaTypeValue(value string) (string, bool) {
 
 type rfc2231MediaParameterIdentity struct {
 	name          string
+	logicalName   string
 	language      string
+	section       uint32
+	continuation  bool
 	fallbackIndex uint32
 }
 
@@ -1227,7 +1241,12 @@ func canonicalRFC2231MediaParameterIdentity(params string, estimatedIdentities i
 			}
 		}
 
-		identity := rfc2231MediaParameterIdentity{name: name}
+		identity := rfc2231MediaParameterIdentity{name: name, logicalName: logicalName}
+		if continuationName, section, ok := mediaParameterContinuationSection(name); ok {
+			identity.logicalName = continuationName
+			identity.section = section
+			identity.continuation = true
+		}
 		if hasMetadata {
 			charset, language, data, ok := splitRFC2231IdentityMetadata(core)
 			if !ok {
@@ -1255,11 +1274,45 @@ func canonicalRFC2231MediaParameterIdentity(params string, estimatedIdentities i
 		return "", true
 	}
 	sort.Slice(identities, func(i, j int) bool {
+		if comparison := compareASCIIFold(identities[i].logicalName, identities[j].logicalName); comparison != 0 {
+			return comparison < 0
+		}
+		if identities[i].continuation != identities[j].continuation {
+			return !identities[i].continuation
+		}
+		if identities[i].continuation && identities[i].section != identities[j].section {
+			return identities[i].section < identities[j].section
+		}
 		if comparison := compareASCIIFold(identities[i].name, identities[j].name); comparison != 0 {
 			return comparison < 0
 		}
 		return compareASCIIFold(identities[i].language, identities[j].language) < 0
 	})
+
+	for i := 0; i < len(identities); {
+		j := i
+		hasContinuation := false
+		var lastSection uint32
+		for j < len(identities) && strings.EqualFold(identities[j].logicalName, identities[i].logicalName) {
+			identity := identities[j]
+			if identity.continuation {
+				if !hasContinuation {
+					if identity.section != 0 {
+						return "", false
+					}
+					hasContinuation = true
+					lastSection = 0
+				} else if identity.section != lastSection {
+					if identity.section != lastSection+1 {
+						return "", false
+					}
+					lastSection = identity.section
+				}
+			}
+			j++
+		}
+		i = j
+	}
 
 	var encoded strings.Builder
 	encoded.Grow(encodedLength)

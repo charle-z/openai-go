@@ -1343,6 +1343,30 @@ func TestRegisterDecoderXOPTypeRejectsMalformedRFC2231ContinuationPayload(t *tes
 	}
 }
 
+func TestRegisterDecoderXOPTypeRejectsGappedRFC2231Continuations(t *testing.T) {
+	const base = "application/xop+xml"
+	registered := `application/xop+xml; type="text/plain; format*0*=UTF-8''FLOWED; format*2*=X"`
+	distinct := `Application/Xop+Xml; type="text/plain; format*0*=utf-8''flowed; format*2*=Y"`
+
+	if decoderContentTypeKey(registered) == decoderContentTypeKey(distinct) {
+		t.Fatal("gapped nested RFC 2231 continuation payloads collapsed")
+	}
+
+	wantBare := &testDecoder{}
+	wantSpecific := &testDecoder{}
+	RegisterDecoder(base, func(io.ReadCloser) Decoder { return wantBare })
+	RegisterDecoder(registered, func(io.ReadCloser) Decoder { return wantSpecific })
+	t.Cleanup(func() {
+		delete(decoderTypes, decoderContentTypeKey(base))
+		delete(decoderTypes, decoderContentTypeKey(registered))
+	})
+
+	decoder := NewDecoder(&http.Response{Header: http.Header{"Content-Type": {distinct}}, Body: io.NopCloser(strings.NewReader(""))})
+	if decoder != wantBare {
+		t.Fatalf("decoder = %T, want bare decoder for distinct gapped RFC 2231 metadata", decoder)
+	}
+}
+
 func TestRegisterDecoderXOPTypeNormalizesUnsupportedRFC2231Continuation(t *testing.T) {
 	const base = "application/xop+xml"
 	registered := `application/xop+xml; type="text/plain; format*0*=ISO-8859-1'en'FLOW; format*1*=ED"`
