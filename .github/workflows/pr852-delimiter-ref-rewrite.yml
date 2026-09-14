@@ -1,0 +1,41 @@
+name: PR852 delimiter fix exact ref rewrite
+
+on:
+  push:
+    branches:
+      - pr852-delimiter-staging-1834119
+
+permissions:
+  contents: write
+
+jobs:
+  rewrite:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Rewrite PR head with exact lease
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_OLD: 7accf61d78770a68f8e0cb3c21f7e73167503e26
+          NEW_SHA: 1834119e268248d88822c5c8424d2c474a94ea5c
+        run: |
+          set -euo pipefail
+          api="https://api.github.com/repos/${GITHUB_REPOSITORY}/git/ref/heads/fix/ssestream-decoder-parameter-case"
+          current="$(curl -fsSL \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "${api}" | python3 -c 'import json,sys; print(json.load(sys.stdin)["object"]["sha"])')"
+          test "${current}" = "${EXPECTED_OLD}"
+          curl -fsSL \
+            -X PATCH \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "${api}" \
+            -d "{\"sha\":\"${NEW_SHA}\",\"force\":true}" >/dev/null
+          updated="$(curl -fsSL \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "${api}" | python3 -c 'import json,sys; print(json.load(sys.stdin)["object"]["sha"])')"
+          test "${updated}" = "${NEW_SHA}"
