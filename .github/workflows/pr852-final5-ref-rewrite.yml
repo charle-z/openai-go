@@ -1,25 +1,49 @@
-name: PR852 final5 exact ref rewrite
+name: PR852 exact-head CI attestation
 on:
   push:
     branches:
       - pr852-final-staging-7accf61
 permissions:
+  checks: read
   contents: write
 jobs:
-  rewrite:
+  attest:
     runs-on: ubuntu-latest
     steps:
-      - name: Rewrite PR head with exact lease
+      - name: Attest exact-head fork CI
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
-          EXPECTED_OLD: 7accf61d78770a68f8e0cb3c21f7e73167503e26
-          NEW_HEAD: 1834119e268248d88822c5c8424d2c474a94ea5c
-          TARGET_REF: heads/fix/ssestream-decoder-parameter-case
+          TARGET_SHA: 1834119e268248d88822c5c8424d2c474a94ea5c
         run: |
           set -euo pipefail
-          current="$(gh api "repos/$REPO/git/ref/$TARGET_REF" --jq .object.sha)"
-          test "$current" = "$EXPECTED_OLD"
-          gh api --method PATCH "repos/$REPO/git/refs/$TARGET_REF" -f sha="$NEW_HEAD" -F force=true >/dev/null
-          current="$(gh api "repos/$REPO/git/ref/$TARGET_REF" --jq .object.sha)"
-          test "$current" = "$NEW_HEAD"
+          for attempt in $(seq 1 30); do
+            json="$(gh api "repos/$REPO/commits/$TARGET_SHA/check-runs?per_page=100")"
+            result="$(printf '%s' "$json" | python3 -c '
+          import datetime,json,sys
+          obj=json.load(sys.stdin)
+          wanted={"lint","test (Go 1.25.x)","test (Go 1.26.x)"}
+          newest={}
+          def stamp(r):
+              return r.get("started_at") or r.get("created_at") or ""
+          for r in obj.get("check_runs",[]):
+              name=r.get("name")
+              if name not in wanted:
+                  continue
+              if name not in newest or stamp(r) > stamp(newest[name]):
+                  newest[name]=r
+          for name in sorted(wanted):
+              r=newest.get(name,{})
+              print(f"{name}: {r.get(chr(115)+chr(116)+chr(97)+chr(116)+chr(117)+chr(115))}/{r.get(chr(99)+chr(111)+chr(110)+chr(99)+chr(108)+chr(117)+chr(115)+chr(105)+chr(111)+chr(110))}", file=sys.stderr)
+          if wanted <= newest.keys() and all(newest[n].get("status")=="completed" and newest[n].get("conclusion")=="success" for n in wanted):
+              print("green")
+          elif any(newest.get(n,{}).get("status")=="completed" and newest[n].get("conclusion") not in (None,"success") for n in wanted):
+              print("bad")
+          else:
+              print("pending")
+          ')"
+            if [ "$result" = green ]; then
+              proof_ref='refs/heads/pr852-ci-green-1834119'
+              if gh api "repos/$REPO/git/ref/heads/pr852-ci-green-1834119" >/dev/null 2>&1; then
+                gh api --method PATCH "repos/$REPO/git/refs/heads/pr852-ci-green-1834119" -f sha="$TARGET_SHA" -F force=true >/dev/null
+              else
