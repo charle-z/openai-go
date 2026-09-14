@@ -1,0 +1,27 @@
+name: PR852 final5 exact ref rewrite
+on:
+  push:
+    branches:
+      - pr852-final-staging-7accf61
+permissions:
+  contents: write
+jobs:
+  rewrite:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Rewrite PR head with exact lease and remove staging ref
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          EXPECTED_OLD: 2ed3ee5ccbfae05e623210abfa5bbaaab66b6020
+          NEW_HEAD: 7accf61d78770a68f8e0cb3c21f7e73167503e26
+          TARGET_REF: heads/fix/ssestream-decoder-parameter-case
+          STAGING_REF: heads/pr852-final-staging-7accf61
+        run: |
+          set -euo pipefail
+          current="$(gh api "repos/$REPO/git/ref/$TARGET_REF" --jq .object.sha)"
+          test "$current" = "$EXPECTED_OLD"
+          gh api --method PATCH "repos/$REPO/git/refs/$TARGET_REF" -f sha="$NEW_HEAD" -F force=true >/dev/null
+          current="$(gh api "repos/$REPO/git/ref/$TARGET_REF" --jq .object.sha)"
+          test "$current" = "$NEW_HEAD"
+          gh api --method DELETE "repos/$REPO/git/refs/$STAGING_REF" >/dev/null
