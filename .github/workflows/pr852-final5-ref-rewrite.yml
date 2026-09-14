@@ -1,4 +1,4 @@
-name: PR852 gap-fix CI attestation
+name: PR852 32a exact-head CI attestation
 on:
   push:
     branches:
@@ -14,7 +14,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
-          TARGET_SHA: ed3a2d506cc7f432e3d88b134b3bb68f96f16dcf
+          TARGET_SHA: 32a34d03e693b963fb634ecf86e74de29f908cd0
         run: |
           set -euo pipefail
           required=("lint" "test (Go 1.25.x)" "test (Go 1.26.x)")
@@ -34,10 +34,10 @@ jobs:
               fi
             done
             if [[ "$all_green" == 1 ]]; then
-              if gh api "repos/$REPO/git/ref/heads/pr852-ci-green-ed3a2d5" >/dev/null 2>&1; then
-                gh api --method PATCH "repos/$REPO/git/refs/heads/pr852-ci-green-ed3a2d5" -f sha="$TARGET_SHA" -F force=true >/dev/null
+              if gh api "repos/$REPO/git/ref/heads/pr852-ci-green-32a34d0" >/dev/null 2>&1; then
+                gh api --method PATCH "repos/$REPO/git/refs/heads/pr852-ci-green-32a34d0" -f sha="$TARGET_SHA" -F force=true >/dev/null
               else
-                gh api --method POST "repos/$REPO/git/refs" -f ref='refs/heads/pr852-ci-green-ed3a2d5' -f sha="$TARGET_SHA" >/dev/null
+                gh api --method POST "repos/$REPO/git/refs" -f ref='refs/heads/pr852-ci-green-32a34d0' -f sha="$TARGET_SHA" >/dev/null
               fi
               exit 0
             fi
