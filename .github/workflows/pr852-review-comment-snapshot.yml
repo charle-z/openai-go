@@ -1,0 +1,37 @@
+name: PR852 review comment snapshot
+on:
+  push:
+    branches:
+      - integrated/pr852-audit-comments
+permissions:
+  contents: write
+jobs:
+  snapshot:
+    if: ${{ !contains(github.event.head_commit.message, 'audit: snapshot PR852 review comments') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Snapshot recent upstream review activity
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          BRANCH: integrated/pr852-audit-comments
+          SINCE: '2026-09-14T17:00:00Z'
+        run: |
+          set -euo pipefail
+          out="$(mktemp)"
+          {
+            echo '=== REVIEWS ==='
+            gh api --paginate 'repos/openai/openai-go/pulls/852/reviews?per_page=100' \
+              --jq ".[] | select(.submitted_at != null and .submitted_at >= \"$SINCE\") | {id, user: .user.login, state, submitted_at, commit_id, body}"
+            echo '=== REVIEW COMMENTS ==='
+            gh api --paginate 'repos/openai/openai-go/pulls/852/comments?per_page=100' \
+              --jq ".[] | select(.created_at >= \"$SINCE\") | {id, user: .user.login, created_at, updated_at, commit_id, pull_request_review_id, in_reply_to_id, path, line, original_line, body, html_url}"
+            echo '=== ISSUE COMMENTS ==='
+            gh api --paginate 'repos/openai/openai-go/issues/852/comments?per_page=100' \
+              --jq ".[] | select(.created_at >= \"$SINCE\") | {id, user: .user.login, created_at, updated_at, body, html_url}"
+          } > "$out"
+          encoded="$(base64 -w0 "$out")"
+          gh api --method PUT "repos/$REPO/contents/audit/pr852-recent-review-activity.txt" \
+            -f message='audit: snapshot PR852 review comments' \
+            -f content="$encoded" \
+            -f branch="$BRANCH" >/dev/null
