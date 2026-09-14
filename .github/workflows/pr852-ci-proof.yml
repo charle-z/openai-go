@@ -1,6 +1,7 @@
 name: PR852 exact-head CI proof
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - pr852-delimiter-staging-1834119
