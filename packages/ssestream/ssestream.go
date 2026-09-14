@@ -17,8 +17,10 @@ import (
 
 	shimjson "github.com/openai/openai-go/v3/internal/encoding/json"
 	"github.com/tidwall/gjson"
+	textencoding "golang.org/x/text/encoding"
 	"golang.org/x/text/encoding/ianaindex"
 	"golang.org/x/text/encoding/unicode/utf32"
+	"golang.org/x/text/transform"
 )
 
 type Decoder interface {
@@ -302,10 +304,12 @@ func decodeExtendedMediaParameter(params string, logicalName string) (string, st
 }
 
 type extendedMediaParameterDecoder struct {
-	decoded    strings.Builder
-	encodedRun []byte
-	charset    string
-	language   string
+	decoded        strings.Builder
+	encodedRun     []byte
+	decodedRun     []byte
+	charsetDecoder *textencoding.Decoder
+	charset        string
+	language       string
 }
 
 func (decoder *extendedMediaParameterDecoder) consume(section int, segment extendedMediaParameterSection) bool {
@@ -343,11 +347,25 @@ func (decoder *extendedMediaParameterDecoder) flushEncoded() bool {
 	if len(decoder.encodedRun) == 0 {
 		return true
 	}
-	text, ok := decodeMIMEParameterValue(decoder.charset, decoder.encodedRun)
-	if !ok {
+	if decoder.charset == "" {
+		decoder.decoded.Write(decoder.encodedRun)
+		decoder.encodedRun = decoder.encodedRun[:0]
+		return true
+	}
+	if decoder.charsetDecoder == nil {
+		decoderEncoding, ok := mimeParameterEncoding(decoder.charset)
+		if !ok || decoderEncoding == nil {
+			return false
+		}
+		decoder.charsetDecoder = decoderEncoding.NewDecoder()
+	}
+	decoder.decodedRun = decoder.decodedRun[:0]
+	var err error
+	decoder.decodedRun, _, err = transform.Append(decoder.charsetDecoder, decoder.decodedRun, decoder.encodedRun)
+	if err != nil {
 		return false
 	}
-	decoder.decoded.WriteString(text)
+	decoder.decoded.Write(decoder.decodedRun)
 	decoder.encodedRun = decoder.encodedRun[:0]
 	return true
 }
@@ -592,8 +610,8 @@ func validRFC822DateTime(value string) bool {
 	return true
 }
 
-func validH264ProfileLevelID(value string) bool {
-	if len(value) != 6 {
+func validFixedLengthHex(value string, length int) bool {
+	if len(value) != length {
 		return false
 	}
 	for i := 0; i < len(value); i++ {
@@ -602,6 +620,16 @@ func validH264ProfileLevelID(value string) bool {
 		}
 	}
 	return true
+}
+
+func validH264ProfileLevelID(value string) bool {
+	return validFixedLengthHex(value, 6)
+}
+
+func validH264MaxReceiveLevel(value string) bool {
+	// RFC 6184 and RFC 6190 define max-recv-level as the base16
+	// representation of profile-iop plus level_idc: two bytes, four digits.
+	return validFixedLengthHex(value, 4)
 }
 
 func decodeExtendedOctets(value string) ([]byte, bool) {
@@ -624,14 +652,14 @@ func appendDecodedExtendedOctets(decoded []byte, value string) ([]byte, bool) {
 	return decoded, true
 }
 
-func decodeMIMEParameterValue(charset string, value []byte) (string, bool) {
+func mimeParameterEncoding(charset string) (textencoding.Encoding, bool) {
 	if charset == "" {
-		return string(value), true
+		return nil, true
 	}
 
 	decoderEncoding, err := ianaindex.IANA.Encoding(charset)
 	if err != nil {
-		return "", false
+		return nil, false
 	}
 	if decoderEncoding == nil {
 		switch asciiLower(charset) {
@@ -642,8 +670,19 @@ func decodeMIMEParameterValue(charset string, value []byte) (string, bool) {
 		case "utf-32", "csutf32":
 			decoderEncoding = utf32.UTF32(utf32.BigEndian, utf32.ExpectBOM)
 		default:
-			return "", false
+			return nil, false
 		}
+	}
+	return decoderEncoding, true
+}
+
+func decodeMIMEParameterValue(charset string, value []byte) (string, bool) {
+	decoderEncoding, ok := mimeParameterEncoding(charset)
+	if !ok {
+		return "", false
+	}
+	if decoderEncoding == nil {
+		return string(value), true
 	}
 	decoded, err := decoderEncoding.NewDecoder().Bytes(value)
 	if err != nil {
@@ -1000,8 +1039,16 @@ func isCaseInsensitiveMediaParameterValue(mediaType string, name string, externa
 		case "method", "component":
 			return true
 		}
-	case "video/h264", "video/h264-svc":
-		return strings.EqualFold(name, "profile-level-id")
+	case "video/h264":
+		switch asciiLower(name) {
+		case "profile-level-id", "max-recv-level":
+			return true
+		}
+	case "video/h264-svc":
+		switch asciiLower(name) {
+		case "profile-level-id", "max-recv-level", "max-recv-base-level":
+			return true
+		}
 	}
 	return false
 }
@@ -1381,9 +1428,19 @@ func validCaseInsensitiveMediaParameterValue(mediaType string, name string, valu
 		case "method", "component":
 			return isMIMEToken(value)
 		}
-	case "video/h264", "video/h264-svc":
-		if strings.EqualFold(name, "profile-level-id") {
+	case "video/h264":
+		switch asciiLower(name) {
+		case "profile-level-id":
 			return validH264ProfileLevelID(value)
+		case "max-recv-level":
+			return validH264MaxReceiveLevel(value)
+		}
+	case "video/h264-svc":
+		switch asciiLower(name) {
+		case "profile-level-id":
+			return validH264ProfileLevelID(value)
+		case "max-recv-level", "max-recv-base-level":
+			return validH264MaxReceiveLevel(value)
 		}
 	}
 	return false

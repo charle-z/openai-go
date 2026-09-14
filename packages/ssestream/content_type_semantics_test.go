@@ -670,6 +670,27 @@ func TestDecoderContentTypeKeyUsesCompactContinuationState(t *testing.T) {
 	}
 }
 
+func TestDecoderContentTypeKeyReusesCharsetDecoderAcrossAlternatingRFC2231Runs(t *testing.T) {
+	var contentType strings.Builder
+	contentType.Grow(256 << 10)
+	contentType.WriteString("text/plain; charset*0*=UTF-8''x")
+	for i := 1; contentType.Len() < 256<<10; i++ {
+		contentType.WriteString("; charset*")
+		contentType.WriteString(strconv.Itoa(i))
+		if i%2 == 0 {
+			contentType.WriteByte('*')
+		}
+		contentType.WriteString("=x")
+	}
+	value := contentType.String()
+	allocs := testing.AllocsPerRun(3, func() {
+		_ = decoderContentTypeKey(value)
+	})
+	if allocs > 256 {
+		t.Fatalf("alternating RFC 2231 charset-run allocations = %.0f, want <= 256", allocs)
+	}
+}
+
 func TestDecoderContentTypeKeyWritesExtendedValuesWithoutPerParameterAllocations(t *testing.T) {
 	var contentType strings.Builder
 	contentType.Grow(256 << 10)
@@ -856,6 +877,40 @@ func TestRegisterDecoderFoldsH264ProfileLevelID(t *testing.T) {
 	}
 }
 
+func TestRegisterDecoderFoldsH264ReceiveLevelHex(t *testing.T) {
+	for name, test := range map[string]struct {
+		registered string
+		response   string
+	}{
+		"h264 max-recv-level": {
+			registered: "video/H264; max-recv-level=000D",
+			response:   "Video/H264; max-recv-level=000d",
+		},
+		"h264 extended max-recv-level": {
+			registered: "video/H264; max-recv-level*=UTF-8''000D",
+			response:   "Video/H264; max-recv-level*=utf-8''000d",
+		},
+		"h264 svc max-recv-level": {
+			registered: "video/H264-SVC; max-recv-level=000D",
+			response:   "Video/H264-SVC; max-recv-level=000d",
+		},
+		"h264 svc max-recv-base-level": {
+			registered: "video/H264-SVC; max-recv-base-level=000D",
+			response:   "Video/H264-SVC; max-recv-base-level=000d",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			want := &testDecoder{}
+			RegisterDecoder(test.registered, func(io.ReadCloser) Decoder { return want })
+			t.Cleanup(func() { delete(decoderTypes, decoderContentTypeKey(test.registered)) })
+			decoder := NewDecoder(&http.Response{Header: http.Header{"Content-Type": {test.response}}, Body: io.NopCloser(strings.NewReader(""))})
+			if decoder != want {
+				t.Fatalf("decoder = %T, want registered decoder", decoder)
+			}
+		})
+	}
+}
+
 func TestRegisterDecoderDoesNotFoldInvalidOrCaseSensitiveH264Values(t *testing.T) {
 	const base = "video/H264"
 	for name, test := range map[string]struct {
@@ -865,6 +920,10 @@ func TestRegisterDecoderDoesNotFoldInvalidOrCaseSensitiveH264Values(t *testing.T
 		"invalid profile-level-id": {
 			registered: "video/H264; profile-level-id=42E01",
 			response:   "video/H264; profile-level-id=42e01",
+		},
+		"invalid two-digit max-recv-level": {
+			registered: "video/H264; max-recv-level=0D",
+			response:   "video/H264; max-recv-level=0d",
 		},
 		"sprop parameter sets": {
 			registered: "video/H264; sprop-parameter-sets=QUJD",
