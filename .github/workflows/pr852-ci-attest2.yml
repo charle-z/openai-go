@@ -1,0 +1,71 @@
+name: PR852 exact-head CI attestation v2
+
+on:
+  push:
+    branches:
+      - pr852-final-staging-7accf61
+
+permissions:
+  checks: read
+  contents: write
+
+jobs:
+  attest:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Attest exact-head fork CI
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          TARGET_SHA: 1834119e268248d88822c5c8424d2c474a94ea5c
+        run: |
+          set -euo pipefail
+
+          mark() {
+            local name="$1"
+            local ref="refs/heads/$name"
+            if gh api "repos/$REPO/git/ref/heads/$name" >/dev/null 2>&1; then
+              gh api --method PATCH "repos/$REPO/git/refs/heads/$name" -f sha="$TARGET_SHA" -F force=true >/dev/null
+            else
+              gh api --method POST "repos/$REPO/git/refs" -f ref="$ref" -f sha="$TARGET_SHA" >/dev/null
+            fi
+          }
+
+          mark pr852-ci-proof-started-1834119
+
+          for attempt in $(seq 1 30); do
+            gh api "repos/$REPO/commits/$TARGET_SHA/check-runs?per_page=100" > checks.json
+            result="$(python3 - <<'PY'
+          import json
+          with open('checks.json', 'r', encoding='utf-8') as f:
+              obj = json.load(f)
+          wanted = {'lint', 'test (Go 1.25.x)', 'test (Go 1.26.x)'}
+          newest = {}
+          def stamp(run):
+              return run.get('started_at') or run.get('created_at') or ''
+          for run in obj.get('check_runs', []):
+              name = run.get('name')
+              if name in wanted and (name not in newest or stamp(run) > stamp(newest[name])):
+                  newest[name] = run
+          if wanted <= newest.keys() and all(newest[name].get('status') == 'completed' and newest[name].get('conclusion') == 'success' for name in wanted):
+              print('green')
+          elif any(newest.get(name, {}).get('status') == 'completed' and newest[name].get('conclusion') not in (None, 'success') for name in wanted):
+              print('bad')
+          else:
+              print('pending')
+          PY
+          )"
+
+            if [ "$result" = green ]; then
+              mark pr852-ci-green-1834119
+              exit 0
+            fi
+            if [ "$result" = bad ]; then
+              mark pr852-ci-bad-1834119
+              exit 1
+            fi
+            sleep 10
+          done
+
+          mark pr852-ci-pending-1834119
+          exit 2
