@@ -1,0 +1,56 @@
+name: PR852 exact-head CI proof
+
+on:
+  push:
+    branches:
+      - pr852-delimiter-staging-1834119
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  attest:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Attest required fork CI checks
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_SHA: 1834119e268248d88822c5c8424d2c474a94ea5c
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          required='lint|test (Go 1.25.x)|test (Go 1.26.x)'
+          for attempt in $(seq 1 30); do
+            json="$(gh api "repos/$REPO/commits/$TARGET_SHA/check-runs?per_page=100")"
+            result="$(printf '%s' "$json" | python3 -c '
+import json,sys
+obj=json.load(sys.stdin)
+want={"lint","test (Go 1.25.x)","test (Go 1.26.x)"}
+latest={}
+for r in obj.get("check_runs",[]):
+    n=r.get("name")
+    if n in want:
+        latest[n]=(r.get("status"),r.get("conclusion"))
+if want <= latest.keys() and all(latest[n] == ("completed","success") for n in want):
+    print("green")
+elif any(latest.get(n,(None,None))[0] == "completed" and latest[n][1] not in ("success",None) for n in want):
+    print("bad")
+else:
+    print("pending")
+')"
+            if [ "$result" = green ]; then
+              ref='refs/heads/pr852-ci-green-1834119'
+              if gh api "repos/$REPO/git/ref/heads/pr852-ci-green-1834119" >/dev/null 2>&1; then
+                gh api --method PATCH "repos/$REPO/git/refs/heads/pr852-ci-green-1834119" -f sha="$TARGET_SHA" -F force=true >/dev/null
+              else
+                gh api --method POST "repos/$REPO/git/refs" -f ref="$ref" -f sha="$TARGET_SHA" >/dev/null
+              fi
+              exit 0
+            fi
+            if [ "$result" = bad ]; then
+              exit 1
+            fi
+            sleep 10
+          done
+          exit 2
