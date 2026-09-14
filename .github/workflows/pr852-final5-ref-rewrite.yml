@@ -1,49 +1,41 @@
-name: PR852 exact-head CI attestation
+name: PR852 persist recent review comments
 on:
   push:
     branches:
       - pr852-final-staging-7accf61
 permissions:
-  checks: read
   contents: write
 jobs:
-  attest:
+  persist:
+    if: ${{ !contains(github.event.head_commit.message, 'audit: persist PR852 review snapshot') }}
     runs-on: ubuntu-latest
     steps:
-      - name: Attest exact-head fork CI
+      - name: Read public upstream review activity and persist snapshot
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
-          TARGET_SHA: 1834119e268248d88822c5c8424d2c474a94ea5c
+          BRANCH: pr852-final-staging-7accf61
+          SINCE: '2026-09-14T17:00:00Z'
         run: |
           set -euo pipefail
-          for attempt in $(seq 1 30); do
-            json="$(gh api "repos/$REPO/commits/$TARGET_SHA/check-runs?per_page=100")"
-            result="$(printf '%s' "$json" | python3 -c '
-          import datetime,json,sys
-          obj=json.load(sys.stdin)
-          wanted={"lint","test (Go 1.25.x)","test (Go 1.26.x)"}
-          newest={}
-          def stamp(r):
-              return r.get("started_at") or r.get("created_at") or ""
-          for r in obj.get("check_runs",[]):
-              name=r.get("name")
-              if name not in wanted:
-                  continue
-              if name not in newest or stamp(r) > stamp(newest[name]):
-                  newest[name]=r
-          for name in sorted(wanted):
-              r=newest.get(name,{})
-              print(f"{name}: {r.get(chr(115)+chr(116)+chr(97)+chr(116)+chr(117)+chr(115))}/{r.get(chr(99)+chr(111)+chr(110)+chr(99)+chr(108)+chr(117)+chr(115)+chr(105)+chr(111)+chr(110))}", file=sys.stderr)
-          if wanted <= newest.keys() and all(newest[n].get("status")=="completed" and newest[n].get("conclusion")=="success" for n in wanted):
-              print("green")
-          elif any(newest.get(n,{}).get("status")=="completed" and newest[n].get("conclusion") not in (None,"success") for n in wanted):
-              print("bad")
-          else:
-              print("pending")
-          ')"
-            if [ "$result" = green ]; then
-              proof_ref='refs/heads/pr852-ci-green-1834119'
-              if gh api "repos/$REPO/git/ref/heads/pr852-ci-green-1834119" >/dev/null 2>&1; then
-                gh api --method PATCH "repos/$REPO/git/refs/heads/pr852-ci-green-1834119" -f sha="$TARGET_SHA" -F force=true >/dev/null
-              else
+          out="$(mktemp)"
+          {
+            echo '=== REVIEWS ==='
+            gh api --paginate 'repos/openai/openai-go/pulls/852/reviews?per_page=100' \
+              --jq ".[] | select(.submitted_at != null and .submitted_at >= \"$SINCE\") | {id, user: .user.login, state, submitted_at, commit_id, body}"
+            echo '=== REVIEW COMMENTS ==='
+            gh api --paginate 'repos/openai/openai-go/pulls/852/comments?per_page=100' \
+              --jq ".[] | select(.created_at >= \"$SINCE\") | {id, user: .user.login, created_at, updated_at, commit_id, pull_request_review_id, in_reply_to_id, path, line, original_line, body, html_url}"
+          } > "$out"
+          encoded="$(base64 -w0 "$out")"
+          path='audit/pr852-recent-review-activity.txt'
+          sha="$(gh api "repos/$REPO/contents/$path?ref=$BRANCH" --jq .sha 2>/dev/null || true)"
+          if [ -n "$sha" ]; then
+            gh api --method PUT "repos/$REPO/contents/$path" \
+              -f message='audit: persist PR852 review snapshot' \
+              -f content="$encoded" -f branch="$BRANCH" -f sha="$sha" >/dev/null
+          else
+            gh api --method PUT "repos/$REPO/contents/$path" \
+              -f message='audit: persist PR852 review snapshot' \
+              -f content="$encoded" -f branch="$BRANCH" >/dev/null
+          fi
