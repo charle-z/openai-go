@@ -1,5 +1,6 @@
 name: PR852 unauthenticated review snapshot
 on:
+  workflow_dispatch:
   push:
     branches:
       - pr852-final-staging-7accf61
