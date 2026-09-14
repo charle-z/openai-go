@@ -1,25 +1,22 @@
-name: PR852 unauthenticated review snapshot
+name: PR852 persist final review evidence
 on:
-  workflow_dispatch:
   push:
     branches:
       - pr852-final-staging-7accf61
 permissions:
   contents: write
 jobs:
-  snapshot:
-    if: ${{ !contains(github.event.head_commit.message, 'audit: persist PR852 public review snapshot') }}
+  persist:
+    if: ${{ !contains(github.event.head_commit.message, 'audit: persist PR852 final review evidence') }}
     runs-on: ubuntu-latest
     steps:
-      - name: Fetch public upstream review evidence
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
-          BRANCH: pr852-final-staging-7accf61
-          SHA_A: 32a34d03e693b963fb634ecf86e74de29f908cd0
-          SHA_B: c680c496e75003e5abfa935311a9ce480540f965
+      - uses: actions/checkout@v4
+        with:
+          ref: pr852-final-staging-7accf61
+      - name: Fetch public upstream review comments
         run: |
           set -euo pipefail
+          mkdir -p audit
           reviews="$(mktemp)"
           comments="$(mktemp)"
           : > "$reviews"
@@ -36,18 +33,18 @@ jobs:
             jq -c '.[]' <<<"$body" >> "$comments"
             [ "$count" -lt 100 ] && break
           done
-          out="$(mktemp)"
           {
-            echo '=== REVIEWS ==='
-            jq -c --arg a "$SHA_A" --arg b "$SHA_B" 'select(.commit_id == $a or .commit_id == $b) | {id, user: .user.login, state, submitted_at, commit_id, body}' "$reviews"
-            echo '=== REVIEW COMMENTS ==='
-            jq -c --arg a "$SHA_A" --arg b "$SHA_B" 'select(.commit_id == $a or .commit_id == $b) | {id, user: .user.login, created_at, updated_at, commit_id, pull_request_review_id, in_reply_to_id, path, line, original_line, body, html_url}' "$comments"
-          } > "$out"
-          encoded="$(base64 -w0 "$out")"
-          path='audit/pr852-public-review-snapshot.txt'
-          sha="$(gh api "repos/$REPO/contents/$path?ref=$BRANCH" --jq .sha 2>/dev/null || true)"
-          if [ -n "$sha" ]; then
-            gh api --method PUT "repos/$REPO/contents/$path" -f message='audit: persist PR852 public review snapshot' -f content="$encoded" -f branch="$BRANCH" -f sha="$sha" >/dev/null
-          else
-            gh api --method PUT "repos/$REPO/contents/$path" -f message='audit: persist PR852 public review snapshot' -f content="$encoded" -f branch="$BRANCH" >/dev/null
-          fi
+            echo '=== REVIEWS SINCE 20:00Z ==='
+            jq -c 'select(.submitted_at != null and .submitted_at >= "2026-09-14T20:00:00Z") | {id, user: .user.login, state, submitted_at, commit_id, body}' "$reviews"
+            echo '=== REVIEW COMMENTS SINCE 20:00Z ==='
+            jq -c 'select(.created_at >= "2026-09-14T20:00:00Z") | {id, user: .user.login, created_at, updated_at, commit_id, pull_request_review_id, in_reply_to_id, path, line, original_line, body, html_url}' "$comments"
+          } > audit/pr852-final-review-evidence.txt
+      - name: Commit evidence to staging branch
+        run: |
+          set -euo pipefail
+          git config user.name 'Aeontra'
+          git config user.email 'aeontra@localhost'
+          git add audit/pr852-final-review-evidence.txt
+          git diff --cached --quiet && exit 0
+          git commit -m 'audit: persist PR852 final review evidence'
+          git push origin HEAD:pr852-final-staging-7accf61
