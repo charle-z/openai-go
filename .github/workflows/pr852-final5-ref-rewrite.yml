@@ -1,4 +1,4 @@
-name: PR852 invalid-star candidate CI attestation
+name: PR852 invalid-star v2 CI attestation
 on:
   push:
     branches:
@@ -14,7 +14,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
-          TARGET_SHA: dd6884e435bcae5a429fd86a0ff71ec7c78c9fe7
+          TARGET_SHA: 189aeec11cf5efc5b18bb180a92137cb178d983d
         run: |
           set -euo pipefail
           required=("lint" "test (Go 1.25.x)" "test (Go 1.26.x)")
@@ -34,10 +34,10 @@ jobs:
               fi
             done
             if [[ "$all_green" == 1 ]]; then
-              if gh api "repos/$REPO/git/ref/heads/pr852-ci-green-dd6884e" >/dev/null 2>&1; then
-                gh api --method PATCH "repos/$REPO/git/refs/heads/pr852-ci-green-dd6884e" -f sha="$TARGET_SHA" -F force=true >/dev/null
+              if gh api "repos/$REPO/git/ref/heads/pr852-ci-green-189aeec" >/dev/null 2>&1; then
+                gh api --method PATCH "repos/$REPO/git/refs/heads/pr852-ci-green-189aeec" -f sha="$TARGET_SHA" -F force=true >/dev/null
               else
-                gh api --method POST "repos/$REPO/git/refs" -f ref='refs/heads/pr852-ci-green-dd6884e' -f sha="$TARGET_SHA" >/dev/null
+                gh api --method POST "repos/$REPO/git/refs" -f ref='refs/heads/pr852-ci-green-189aeec' -f sha="$TARGET_SHA" >/dev/null
               fi
               exit 0
             fi
